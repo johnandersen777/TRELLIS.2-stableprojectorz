@@ -65,7 +65,11 @@ def from_pretrained(path: str, **kwargs):
     with open(config_file, 'r') as f:
         config = json.load(f)
     model = __getattr__(config['name'])(**config['args'], **kwargs)
-    model.load_state_dict(load_file(model_file), strict=False)
+    # Load state dict, then aggressively free the temporary dict.
+    # load_file doubles peak RAM; explicit del + gc keeps peak at ~2x model size.
+    state_dict = load_file(model_file)
+    model.load_state_dict(state_dict, strict=False)
+    del state_dict
 
     return model
 

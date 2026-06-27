@@ -38,12 +38,16 @@ class Pipeline:
         with open(config_file, 'r') as f:
             args = json.load(f)['args']
 
+        import gc
         _models = {}
         for k, v in args['models'].items():
             try:
                 _models[k] = models.from_pretrained(f"{path}/{v}")
             except Exception as e:
                 _models[k] = models.from_pretrained(v)
+            # Force cleanup between model loads to keep peak RAM low
+            gc.collect()
+            import torch; torch.cuda.empty_cache()
 
         new_pipeline = Pipeline(_models)
         new_pipeline._pretrained_args = args

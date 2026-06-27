@@ -144,8 +144,25 @@ class Trellis2ImageTo3DPipeline(Pipeline):
 
 
     def _convert_bf16_to_fp16_if_needed(self):
-        """Convert all bfloat16 tensors to float16 for widest GPU compatibility."""
+        """Convert all bfloat16 tensors to float16 for widest GPU compatibility.
+
+        SKIPPED on ROCm/gfx1201 (AMD RDNA4): native bfloat16 support verified.
+        The CPU-side per-parameter .half() over ~4B params is single-threaded and
+        burns 4+ minutes at load; gfx1201 runs bf16 natively on GPU, so skip it.
+        """
+        import os
         import torch
+        # Only convert on non-AMD / older GPUs that lack native bf16.
+        if os.environ.get('TRELLIS_SKIP_BF16_FP16', '0') == '1':
+            return
+        try:
+            is_amd = (torch.cuda.is_available()
+                      and ('AMD' in torch.cuda.get_device_name(0).upper()
+                           or 'RADEON' in torch.cuda.get_device_name(0).upper()))
+        except Exception:
+            is_amd = False
+        if is_amd:
+            return
 
         def _half_module(m):
             """Convert an nn.Module entirely to fp16."""

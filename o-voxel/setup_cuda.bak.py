@@ -1,71 +1,45 @@
 # File: o-voxel/setup.py
-# o-voxel/setup.py — AMD ROCm build
+# o-voxel/setup.py
 from setuptools import setup, find_packages
 from torch.utils.cpp_extension import CUDAExtension, BuildExtension
 import os
 import sys
-import subprocess
-import ctypes.wintypes
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# --- Short-name conversion for Windows paths with spaces ---
-def _short_path(path: str) -> str:
-    """Convert Windows path to 8.3 short form. Returns original if not NT or no spaces."""
-    if os.name != 'nt' or ' ' not in path:
-        return path
-    try:
-        buf = ctypes.create_unicode_buffer(512)
-        ctypes.windll.kernel32.GetShortPathNameW(path, buf, 512)
-        return buf.value or path
-    except Exception:
-        return path
-
-# --- Monkey-patch PyTorch _nt_quote_args to use short paths ---
-import torch.utils.cpp_extension as _cpp_ext
-_orig_nt_quote_args = _cpp_ext._nt_quote_args
-
-def _patched_nt_quote_args(args):
-    """Quote args and convert include/lib dirs to short names."""
-    if not args:
-        return []
-    result = []
-    for arg in args:
-        # If it's an -I or -L flag with a path containing spaces, short-name the path
-        if (' ' in arg) and (arg.startswith('-I') or arg.startswith('-L')):
-            prefix = arg[:2]
-            path_part = arg[2:]
-            short = _short_path(path_part)
-            arg = prefix + short
-        result.append(f'"{arg}"' if ' ' in arg else arg)
-    return result
-
-_cpp_ext._nt_quote_args = _patched_nt_quote_args
-
 # --- Compiler Flags Configuration ---
 
+# Windows-specific C++ flags
+# /bigobj is crucial for heavy template libraries like Eigen on Windows
 if os.name == 'nt':
     cxx_flags = ['/O2', '/std:c++17', '/bigobj', '/D_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS']
 else:
     cxx_flags = ['-O3', '-std=c++17']
 
-# HIP/ROCm compiler flags (replaces NVCC flags)
-# --use_fast_math and --expt-relaxed-constexpr are NVCC-only; use clang equivalents
+# NVCC Flags (CUDA Compiler)
 nvcc_flags = [
     '-O3',
-    '-ffast-math',
-    '-fno-gpu-rdc',
-    '-std=c++17',
+    '--use_fast_math', 
+    '--expt-relaxed-constexpr',
+    '--allow-unsupported-compiler', # Helps with newer VS versions
+    '-std=c++17'
 ]
 
-# --- Architecture Targeting (AMD ROCm) ---
+# --- Architecture Targeting ---
+# This ensures the wheel works on GTX 10xx (Pascal) through RTX 50xx (Blackwell/Future)
+# We bake the PTX code in so it works without the user needing nvcc.
 arch_flags = [
-    '--offload-arch=gfx1201',  # RDNA 4 / RX 9070 XT
-    '--offload-arch=gfx1100',  # RDNA 3 fallback
+    '-gencode=arch=compute_61,code=sm_61',      # GTX 10 Series (Pascal)
+    '-gencode=arch=compute_75,code=sm_75',      # RTX 20 Series (Turing)
+    '-gencode=arch=compute_86,code=sm_86',      # RTX 30 Series (Ampere)
+    '-gencode=arch=compute_89,code=sm_89',      # RTX 40 Series (Ada)
+    '-gencode=arch=compute_90,code=sm_90',      # H100 / RTX 50 Series (Hopper/Blackwell base)
+    '-gencode=arch=compute_90,code=compute_90'  # PTX for future compatibility
 ]
 nvcc_flags.extend(arch_flags)
 
-os.environ['TORCH_CUDA_ARCH_LIST'] = 'gfx1201'
+# Explicitly set the list for PyTorch to avoid auto-detection issues during build
+os.environ['TORCH_CUDA_ARCH_LIST'] = '6.1;7.5;8.6;8.9;9.0'
 
 setup(
     name="o_voxel",

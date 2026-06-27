@@ -213,6 +213,30 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             max_q_seqlen = max(q_seqlen)
             max_kv_seqlen = max(kv_seqlen)
         out = flash_attn_3.flash_attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_q_seqlen, max_kv_seqlen)
+    elif config.ATTN == 'sdpa':
+        # Pure-PyTorch SDPA fallback — handles variable-length by processing
+        # each sequence independently. Used for AMD ROCm without flash_attn.
+        if num_all_args == 1:
+            q, k, v = qkv.unbind(dim=1)
+        elif num_all_args == 2:
+            k, v = kv.unbind(dim=1)
+        # q: (T, H, C), k: (T, H, C), v: (T, H, C)
+        # Split by seqlen and process each batch element independently
+        q_parts = torch.split(q, q_seqlen, dim=0)
+        k_parts = torch.split(k, kv_seqlen, dim=0)
+        v_parts = torch.split(v, kv_seqlen, dim=0)
+        out_parts = []
+        for qi, ki, vi in zip(q_parts, k_parts, v_parts):
+            Li = qi.shape[0]
+            # (L, H, C) -> (1, H, L, C) for SDPA
+            qi = qi.unsqueeze(0).permute(0, 2, 1, 3)  # (1, H, Lq, C)
+            ki = ki.unsqueeze(0).permute(0, 2, 1, 3)  # (1, H, Lk, C)
+            vi = vi.unsqueeze(0).permute(0, 2, 1, 3)  # (1, H, Lk, C)
+            o = torch.nn.functional.scaled_dot_product_attention(qi, ki, vi)
+            # (1, H, L, C) -> (L, H, C) -> (L, H*C)
+            o = o.squeeze(0).permute(1, 2, 0).reshape(Li, -1)
+            out_parts.append(o)
+        out = torch.cat(out_parts, dim=0)
     else:
         raise ValueError(f"Unknown attention module: {config.ATTN}")
     
