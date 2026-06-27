@@ -3,7 +3,7 @@
 Run the [TRELLIS.2](https://github.com/IgorAherne/TRELLIS.2-stableprojectorz) image→3D
 pipeline on an AMD GPU (no NVIDIA/CUDA), producing a clean watertight textured `.glb`.
 
-**Status: working end-to-end.** Verified on two vehicles from a single photo each:
+**Status: working end-to-end.** Verified on three vehicles from a single photo each:
 - `reference-images/T-80BVM.jpg` (T-80 tank, pulled from Wikipedia) → `T-80BVM.glb`
 - `reference-images/Humvee.jpg` (Humvee, pulled from Wikipedia) → `Humvee.glb`
 
@@ -33,9 +33,22 @@ python -u run_amd.py \
   ../reference-images/T-80BVM.glb \
   --pipeline-type 512
 ```
+
+- For other images, replace both paths:
+  ```bash
+  HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
+  SPARSE_CONV_BACKEND=none \
+  SPARSE_ATTN_BACKEND=sdpa \
+  ATTN_BACKEND=sdpa \
+  PYTORCH_ALLOC_CONF=expandable_segments:True \
+  python -u run_amd.py \
+    ../reference-images/Humvee.jpg \
+    ../reference-images/Humvee.glb \
+    --pipeline-type 512
+  ```
 - `--no-cache` forces a full regenerate (otherwise a `*.glb.cache.pkl` of the raw mesh is
   reused, so you can iterate on the exporter without re-running inference).
-- Runtime: ~2 min after models are cached. First run downloads ~15 GB of checkpoints.
+- Runtime: ~2 min after models are cached (1m 39s). First run downloads ~15 GB of checkpoints.
 
 ### View the result
 ```bash
