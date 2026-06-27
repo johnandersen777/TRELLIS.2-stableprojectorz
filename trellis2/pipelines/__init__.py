@@ -4,8 +4,6 @@ import importlib
 
 __attributes = {
     "Trellis2ImageTo3DPipeline": "trellis2_image_to_3d",
-    "Trellis2ImageTo3DCascadePipeline": "trellis2_image_to_3d_cascade",
-    "Trellis2ImageToTexturePipeline": "trellis2_image_to_tex",
 }
 
 __submodules = ['samplers', 'rembg']
@@ -53,5 +51,3 @@ if __name__ == '__main__':
     from . import samplers, rembg
     from .trellis_image_to_3d import TrellisImageTo3DPipeline
     from .trellis2_image_to_3d import Trellis2ImageTo3DPipeline
-    from .trellis2_image_to_3d_cascade import Trellis2ImageTo3DCascadePipeline
-    from .trellis2_image_to_tex import Trellis2ImageToTexturePipeline
