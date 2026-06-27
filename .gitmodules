@@ -1,0 +1,4 @@
+[submodule "TRELLIS.2-stableprojectorz"]
+	path = TRELLIS.2-stableprojectorz
+	url = https://github.com/johnandersen777/TRELLIS.2-stableprojectorz.git
+	branch = rCOM
