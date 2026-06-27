@@ -233,8 +233,8 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             ki = ki.unsqueeze(0).permute(0, 2, 1, 3)  # (1, H, Lk, C)
             vi = vi.unsqueeze(0).permute(0, 2, 1, 3)  # (1, H, Lk, C)
             o = torch.nn.functional.scaled_dot_product_attention(qi, ki, vi)
-            # (1, H, L, C) -> (L, H, C) -> (L, H*C)
-            o = o.squeeze(0).permute(1, 2, 0).reshape(Li, -1)
+            # (1, H, L, C) -> (L, H, C) -> (L, H*C), H-major to match flash_attn/xformers
+            o = o.squeeze(0).permute(1, 0, 2).reshape(Li, -1)
             out_parts.append(o)
         out = torch.cat(out_parts, dim=0)
     else:
