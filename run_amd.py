@@ -152,6 +152,16 @@ print("[AMD] CUDA extension fallbacks registered")
 
 # ── GPU detection ──────────────────────────────────────────────────
 import torch
+
+# Force fp32 accumulation for fp16/bf16 matmuls. ROCm/rocBLAS defaults to
+# reduced-precision (fp16) accumulation for half-precision GEMMs, which the
+# CUDA flex_gemm path never does. With conv_none running the shape decoder in
+# fp16, fp16 accumulation adds noise to the edge-intersection logits
+# (feats[3:6] > 0), dropping ~17% of surface quads → a porous/holey mesh.
+# fp32 accumulation matches CUDA numerics. Zero extra memory.
+torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+
 print(f"PyTorch {torch.__version__}")
 if torch.cuda.is_available():
     gpu_name = torch.cuda.get_device_name(0)
