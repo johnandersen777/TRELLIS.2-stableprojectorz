@@ -60,9 +60,11 @@
   }
 
   mv.addEventListener('load', () => {
-    info.textContent = mv.src.startsWith('blob:')
-      ? 'Loaded (local file)'
-      : `Loaded ${new URL(mv.src).pathname}`;
+    try {
+      info.textContent = mv.src.startsWith('blob:')
+        ? 'Loaded (local file)'
+        : `Loaded ${mv.src}`;
+    } catch { info.textContent = `Loaded`; }
   });
   mv.addEventListener('error', (e) => {
     info.textContent = 'Failed to load model';

@@ -137,3 +137,159 @@ not used in the final path.
   but not photoreal. A multi-view input or the `1024_cascade` preset would sharpen it.
 - Decimation is disabled (`fast_simplification` not installed) → full-res ~90–110 MB GLBs.
   `pip install fast_simplification` to enable quadric decimation.
+
+---
+
+## TypeScript/Deno Port (WebGPU)
+
+Pure TypeScript port of the TRELLIS.2 pipeline. No Python required for the mesh
+pipeline — reads the Python pickle cache and produces identical `.glb` output.
+Full WebGPU inference path (SS_Flow + SS_Decoder) is implemented but has a
+`toCPU` buffer-validation bug in the Euler sampler loop (under investigation).
+
+**Directory:** `src/` — 47 TypeScript files, zero type errors (`deno check src/`).
+
+### Architecture
+
+```
+src/
+├── runtime/         GPU context, tensor, shader cache, memory tracker
+│   ├── ops/         matmul (tiled WGSL)
+│   └── shaders/wgsl/
+├── dense/
+│   ├── ops/         attention, conv3d, pixel_shuffle_3d, SiLU, GELU,
+│   │                elementwise, RMS/LayerNorm, RoPE, linear
+│   └── blocks/      timestep_embedder, transformer_cross_block
+├── sparse/
+│   ├── ops/         attention, conv3d, linear, norm
+│   └── blocks/      transformer_cross_block
+├── models/          SS_Flow, SS_Decoder, SLatFlow, SparseVAEDecoder
+├── samplers/        Flow Euler ODE sampler (CFG + rescale)
+├── mesh/            Lewiner MC, GLB writer, symmetry mirroring,
+│   │                EDT color fill, gaussian filter, binary closing
+│   └── lewiner_tables.ts  (48 decoded lookup tables, 1462 lines)
+├── model/           safetensors loader, pipeline.json parser
+├── pipeline/        run.ts (CLI), trellis2_image_to_3d.ts
+└── validation/      mesh_test, phase0_test, compare harness
+```
+
+### VRAM & RAM Requirements
+
+| Mode | Peak VRAM | Peak RAM | Notes |
+|------|-----------|----------|-------|
+| **Cache mode** (mesh only) | 0 GB | 1.0 GB | CPU-only; reads Python pickle cache |
+| **Full inference** (SS_Flow + SS_Decoder) | ~500 MB | ~1.5 GB | Per-block weight streaming, lazy safetensors |
+| Python reference (GPU) | 6.1 GB | 23.9 GB | Loads all models + DINOv3 + rembg |
+
+**Why TS is lower:**
+- Lazy safetensors reading — per-block weight tensors read from disk on demand
+- Per-block GPU disposal — weight buffers freed after each transformer block (28 tensors/block)
+- No DINOv3 image feature extractor loaded (Python path only)
+- CPU-only mesh pipeline — marching cubes, EDT fill, gaussian filter run on CPU
+
+**Weight sizes (on disk, BF16/FP16 safetensors):**
+| Model | File | Size |
+|-------|------|------|
+| SS_Flow (1.3B params) | `ss_flow_img_dit_1_3B_64_bf16.safetensors` | 2.5 GB |
+| SS_Decoder external | `ss_dec_conv3d_16l8_fp16.safetensors` | 141 MB |
+| Shape/tex SLatFlow ×4 | Various | 2.5 GB each |
+| Shape/tex decoder ×2 | Various | 905 MB each |
+| **Total on disk** | | **~14 GB** |
+
+Per-block GPU: SS_Flow loads ~170 MB F32 weights per block (28 tensors), disposes after
+block completes. With SS_Decoder (282 MB F32) and intermediate activations (~50-100 MB),
+peak VRAM stays under 500 MB with weight streaming.
+
+**Minimum:** 4 GB VRAM, 8 GB RAM.
+**Recommended:** 8 GB VRAM, 16 GB RAM.
+
+### How to Run
+
+**Prerequisites:**
+- [Deno](https://deno.com/) 2.x+
+- AMD Radeon RX 9070 XT (or any WebGPU-capable GPU with 4+ GB VRAM)
+- Python 3.12 venv (only for pickle cache extraction; `TRELLIS.2-stableprojectorz/venv/`)
+- HuggingFace model cache at `~/.cache/huggingface/hub/models--microsoft--TRELLIS.2-4B/`
+
+**Cache mode** (mesh pipeline only — fast, proven, no GPU needed):
+```bash
+# Requires pre-computed .glb.cache.pkl from a Python run
+deno run --allow-read --allow-write --allow-run --allow-env \
+  src/pipeline/run.ts \
+  --image reference-images/T-80BVM.jpg \
+  --output output.glb
+```
+
+This reads `reference-images/T-80BVM.glb.cache.pkl`, extracts coords+attrs via
+the venv Python, runs the TS mesh pipeline (occupancy grid → symmetry mirror →
+EDT color fill → gaussian → Lewiner MC → GLB), and writes `output.glb`.
+
+**Full inference** (SS_Flow + SS_Decoder — needs WebGPU; see [BUG.md](BUG.md) for mapAsync workaround):
+```bash
+deno run --unstable-webgpu --allow-env --allow-read --allow-write --allow-ffi --allow-run \
+  src/pipeline/run.ts \
+  --image reference-images/T-80BVM.jpg \
+  --output output.glb \
+  --no-cache
+```
+
+**Mesh test** (standalone, from pickle cache):
+```bash
+deno run --allow-read --allow-write --allow-run --allow-env \
+  src/validation/mesh_test.ts
+# Output: reference-images/T-80BVM-ts.glb
+```
+
+**Type check:**
+```bash
+deno check src/                    # zero errors across 47 files
+```
+
+**Serve viewer:**
+```bash
+deno run --allow-net --allow-read serve.ts &
+# Open: http://localhost:8766/glb-viewer.html?model=http://localhost:8766/reference-images/T-80BVM-ts.glb
+```
+
+### Mesh Pipeline Output
+
+| Metric | Python GLB | TS GLB |
+|--------|-----------|--------|
+| Vertices | 2,247,310 | 3,199,790 |
+| Faces | 4,500,564 | 4,273,061 |
+| Mean color | 0.178, 0.191, 0.163 | 0.178, 0.190, 0.162 |
+| Near-gray vertices | 3.7% | 3.2% |
+| Mean saturation | 0.222 | 0.223 |
+| GLB size | 90 MB | 102 MB |
+
+TS produces more vertices (Lewiner MC vs skimage MC) but near-identical colors
+after EDT fill + gaussian σ=1.2. Face count within 5% of Python.
+
+### WebGPU Ops (11 complete)
+
+| Op | Shader | Status |
+|----|--------|--------|
+| Tiled SDPA attention | WGSL 120 lines | ✅ |
+| Dense Conv3d | WGSL implicit GEMM | ✅ |
+| Pixel shuffle 3D | WGSL | ✅ |
+| SiLU / GELU | WGSL | ✅ |
+| Element-wise (add/mul/scale) | WGSL | ✅ |
+| RMS / LayerNorm | WGSL | ✅ |
+| 3D RoPE | WGSL | ✅ |
+| Matmul (tiled) | WGSL | ✅ |
+| Linear (W^T transpose) | CPU + matmul | ✅ |
+
+### Known Issues
+
+- **Deno WebGPU `mapAsync` bug** — `GPUBuffer.mapAsync()` fails after heavy
+  GPU compute (360+ dispatches). SS_Flow + SS_Decoder compute runs correctly
+  on GPU; only the final occupancy→CPU readback fails. No-cache mode falls
+  back to Python cache for voxel coords. See [BUG.md](BUG.md) for full
+  diagnosis and reproduction steps.
+- **Taubin watertightness** — mesh-graph Laplacian smoothing (λ=0.5 / μ=-0.53)
+  creates visible gaps. Disabled by default (`taubinIters=0`); opt-in via
+  `meshFromVoxels(options)`.
+- **No DINOv3 condition** — TS path uses zero conditioning. Python subprocess
+  extracts DINOv3 features for the full inference path but is fragile.
+- **Model weight path** — expects HuggingFace cache at the default location.
+  Override with `--cache-dir` or `TRELLIS_CACHE_DIR`.

@@ -1,0 +1,18 @@
+{
+  "unstable": ["webgpu"],
+  "tasks": {
+    "run": "deno run --unstable-webgpu --allow-env --allow-read --allow-write trellis_webgpu.ts",
+    "probe": "deno run --unstable-webgpu --allow-env trellis_webgpu.ts",
+    "test": "deno test --unstable-webgpu --allow-env --allow-read --allow-write src/",
+    "test:quick": "deno test --unstable-webgpu --allow-env --allow-read --filter \"golden::\" src/validation/",
+    "test:op": "deno test --unstable-webgpu --allow-env --allow-read --filter",
+    "test:mesh": "deno test --allow-read --allow-write --allow-run src/validation/mesh_test.ts",
+    "test:phase0": "deno test --unstable-webgpu --allow-env --allow-read src/validation/phase0_test.ts",
+    "check": "deno check src/"
+  },
+  "imports": {
+    "@std/fs": "jsr:@std/fs@^1.0.0",
+    "@std/path": "jsr:@std/path@^1.0.0",
+    "marching-cubes-fast": "npm:marching-cubes-fast@^0.0.172"
+  }
+}
